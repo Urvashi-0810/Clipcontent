@@ -1,0 +1,54 @@
+name: clipcontext
+
+x-backend: &backend
+  build:
+    context: ./backend
+    args:
+      PRELOAD_LOCAL_WHISPER: "0"
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://clipcontext:clipcontext@db:5432/clipcontext
+    MEDIA_DIR: /data/media
+  volumes:
+    - media:/data/media
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clipcontext
+      POSTGRES_PASSWORD: clipcontext
+      POSTGRES_DB: clipcontext
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"   # lets a locally-run api/worker use this database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clipcontext"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    # CPU-only box: keep heavy work to one container; tune WORKER_CONCURRENCY in .env
+    deploy:
+      resources:
+        limits:
+          cpus: "5"
+
+volumes:
+  pgdata:
+  media:
