@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     llm_mode: Literal["live", "fake"] = "live"
     llm_selection_models: str = "google:gemini-3.8-flash,google:gemini-3.5-flash,google:gemini-3.5-flash-lite"
     llm_vision_models: str = "google:gemini-3.8-flash,google:gemini-3.5-flash,google:gemini-3.5-flash-lite"
-    llm_generator_models: str = "groq:openai/gpt-oss-120b,groq:qwen/qwen3.8-27b,google:gemini-3.5-flash-lite"
-    llm_judge_models: str = "google:gemini-3.8-flash,google:gemini-3.5-flash,groq:qwen/qwen3.8-27b"
-    llm_helper_models: str = "groq:qwen/qwen3.8-27b,google:gemini-3.5-flash-lite"
+    llm_generator_models: str = "groq:openai/gpt-oss-120b,google:gemini-3.5-flash,google:gemini-3.5-flash-lite"
+    llm_judge_models: str = "google:gemini-3.8-flash,google:gemini-3.5-flash,groq:openai/gpt-oss-120b"
+    llm_helper_models: str = "groq:openai/gpt-oss-20b,google:gemini-3.5-flash-lite"
     llm_max_attempts: int = 5
     llm_backoff_seconds: float = 8.0
     llm_timeout_seconds: float = 180.0

@@ -56,12 +56,23 @@ def role_available(role: Role) -> bool:
 
 
 def _is_retryable(exc: Exception) -> bool:
+    from pydantic_ai.exceptions import ModelConnectionError
+
+    if isinstance(exc, ModelConnectionError):  # network blip, DNS failure, dropped connection
+        return True
     status = getattr(exc, "status_code", None)
     if status in (408, 409, 429, 500, 502, 503, 504):
         return True
     text = str(exc).lower()
     return any(s in text for s in ("rate limit", "resource_exhausted", "429", "overloaded", "timeout",
-                                   "temporarily", "unavailable"))
+                                   "temporarily", "unavailable", "connection error", "getaddrinfo"))
+
+
+def _is_bad_output(exc: Exception) -> bool:
+    """The model answered, but not in the requested schema (FallbackModel does not catch this)."""
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    return isinstance(exc, UnexpectedModelBehavior)
 
 
 async def run_structured(
@@ -88,13 +99,16 @@ async def run_structured(
     from pydantic_ai.models.fallback import FallbackModel
     from pydantic_ai.settings import ModelSettings
 
-    model: Any = chain[0] if len(chain) == 1 else FallbackModel(*chain)
     model_settings = ModelSettings(timeout=settings.llm_timeout_seconds)
     if temperature is not None:
         model_settings["temperature"] = temperature
-    agent = Agent(model, output_type=output_type, instructions=instructions,
-                  model_settings=model_settings, retries=2)
 
+    def make_agent(models: list[str]) -> Any:
+        model: Any = models[0] if len(models) == 1 else FallbackModel(*models)
+        return Agent(model, output_type=output_type, instructions=instructions,
+                     model_settings=model_settings, retries=2)
+
+    agent = make_agent(chain)
     user_input: Any = prompt
     if images:
         user_input = [prompt, *[BinaryContent(data=data, media_type=mime) for data, mime in images]]
@@ -106,7 +120,16 @@ async def run_structured(
             return result.output
         except Exception as exc:  # noqa: BLE001 - provider SDKs raise many types
             last_exc = exc
-            if attempt >= settings.llm_max_attempts or not _is_retryable(_root(exc)):
+            if attempt >= settings.llm_max_attempts:
+                break
+            if _is_bad_output(exc):
+                # Malformed output, e.g. gpt-oss calling a made-up 'json' tool: move on to the next model.
+                if len(chain) > 1:
+                    log.warning("LLM %s: %s gave invalid output (%s); trying %s", role, chain[0], exc, chain[1])
+                    chain = chain[1:]
+                    agent = make_agent(chain)
+                continue
+            if not _is_retryable(_root(exc)):
                 break
             delay = settings.llm_backoff_seconds * (2 ** (attempt - 1)) * (0.75 + random.random() / 2)
             retry_after = getattr(_root(exc), "retry_after", None)
